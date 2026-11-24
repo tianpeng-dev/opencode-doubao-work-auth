@@ -65,16 +65,30 @@ if not all(re.fullmatch(r"[0-9]+", value) and value != "0" for value in client_i
     raise RuntimeError("豆包工作客户端标识格式无效，请重新打开客户端并确认登录状态。")
 
 # 提前检查钥匙串，避免解密库在凭据缺失时使用默认密码。
-key = subprocess.run(
-    ["/usr/bin/security", "-q", "find-generic-password", "-w", "-a", "DoubaoWork", "-s", "DoubaoWork Safe Storage"],
-    capture_output=True, check=True, timeout=20,
-)
-if not key.stdout.strip():
-    raise RuntimeError("DoubaoWork Safe Storage 没有可用密码。")
-del key
+# 豆包工作 2.37.x 把内置浏览器改名为 "DoubaoWork Browser"，钥匙串条目跟着改名；
+# 旧版本用 "DoubaoWork Safe Storage"/"DoubaoWork"。两套名字都试，取第一个能用的。
+KEYCHAIN_ENTRIES = [
+    ("DoubaoWork Browser Safe Storage", "DoubaoWork Browser"),
+    ("DoubaoWork Safe Storage", "DoubaoWork"),
+]
+
+
+def find_keychain_entry():
+    for service, account in KEYCHAIN_ENTRIES:
+        probe = subprocess.run(
+            ["/usr/bin/security", "-q", "find-generic-password", "-w", "-a", account, "-s", service],
+            capture_output=True, timeout=20,
+        )
+        if probe.returncode == 0 and probe.stdout.strip():
+            return service, account
+    tried = "、".join(f"{service} / {account}" for service, account in KEYCHAIN_ENTRIES)
+    raise RuntimeError(f"钥匙串里找不到豆包工作的加密密码（已尝试：{tried}）。请确认已安装并登录豆包工作客户端。")
+
+
+key_service, key_user = find_keychain_entry()
 jar = browser_cookie3.ChromiumBased(
     browser="DoubaoWork", cookie_file=str(cookie_file), domain_name="doubao.com",
-    osx_key_service="DoubaoWork Safe Storage", osx_key_user="DoubaoWork",
+    osx_key_service=key_service, osx_key_user=key_user,
 ).load()
 cookies = [
     {"key": c.name, "value": c.value, "domain": c.domain.lstrip("."), "path": c.path,
